@@ -285,7 +285,7 @@ def split(A, Bs, structure_component):
         Ref = new_Ref
         p  += 1
 
-    # FIXME Why? What? I'm not getting disjoint regions.
+    # Make sure the regions are disjoint.
     for i in range(len(S)):
         for j in range(len(S)):
             if i < j:
