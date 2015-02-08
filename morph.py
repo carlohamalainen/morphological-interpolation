@@ -45,38 +45,11 @@ from nipype.interfaces.base import (
     BaseInterfaceInputSpec,
 )
 
-import matplotlib
-matplotlib.use('Agg') # Force matplotlib to not use any Xwindows backend.
-import matplotlib.pyplot as plt
-
 from pyminc.volumes.factory import volumeFromFile, volumeFromDescription
 import skimage.morphology as morph
 import scipy.ndimage.measurements
 
-def uniq(X): return list(set(X))
-
-def write_slice(x, f):
-    plt.imshow(x, interpolation='none')
-    plt.savefig(f)
-    plt.close()
-
-def show_slice(x):
-    plt.imshow(x, interpolation='none')
-    plt.show()
-
-def load_pickled_array(fname):
-    x = np.load(fname)
-    assert len(x.keys()) == 1
-    return x[x.keys()[0]]
-
-def show_npz(fname):
-    show_slice(load_pickled_array(fname))
-
-def load_pklz(f):
-    import pickle
-    import gzip
-
-    return pickle.load(gzip.open(f))
+from utils import *
 
 def nr_components(x):
     """
@@ -1027,7 +1000,9 @@ def go():
 
     workflow = pe.Workflow(name=workflow_name)
 
-    cs = sorted(uniq(data.flatten()))[1:]
+    cs = sorted(uniq(data.flatten()))
+    assert cs[0] == 0
+    cs = cs[1:]
 
     cs = cs[21:][:2] # FIXME Just for testing...
 
@@ -1056,7 +1031,6 @@ def go():
                                         slice_size, dim_to_interpolate, volume.dimnames,
                                         nr_interpolation_steps, volume.starts, new_separations, new_sizes)
 
-
     merge_minc_names = pe.Node(interface=Merge(len(minc_sink)), name='merge_minc_names')
 
     for (i, minc) in enumerate(minc_sink.itervalues()):
@@ -1076,8 +1050,8 @@ def go():
     merged_minc_sink = pe.Node(interface=nio.DataSink(), name='merged_minc_sink')
     workflow.connect(actual_final_merge, 'out_file', merged_minc_sink, 'merged_minc_file')
 
-    workflow.run()
-    # workflow.run(plugin='MultiProc', plugin_args={'n_procs' : 4})
+    # workflow.run()
+    workflow.run(plugin='MultiProc', plugin_args={'n_procs' : 4})
 
 
 
