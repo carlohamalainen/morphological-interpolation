@@ -1062,6 +1062,12 @@ def go():
     workflow.connect(actual_final_merge, 'out_file', merged_minc_sink, 'merged_minc_file')
 
     # workflow.run()
+
+    # FIXME Hardcoded...
+    os.system('rm -fr /tmp/tmp_carlo')
+    os.system('mkdir /tmp/tmp_carlo')
+    workflow.base_dir = '/tmp/tmp_carlo'
+
     workflow.run(plugin='MultiProc', plugin_args={'n_procs' : 16})
 
 if __name__ == '__main__':
