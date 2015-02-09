@@ -659,6 +659,8 @@ class InterpolateBetweenSlices(BaseInterface):
 
 def select_function(x, i): return x[i]
 
+def identity_function(x): return x
+
 def create_stage(stage_nr, workflow, inputs, inputs_nr_slices, slice_name):
     """
     Don't use this directly, see build_workflow() instead.
@@ -671,7 +673,7 @@ def create_stage(stage_nr, workflow, inputs, inputs_nr_slices, slice_name):
     for i in range(inputs_nr_slices):
         fi = Function(input_names=['x', 'i'], output_names=['out_file'], function=select_function)
 
-        select_inputs[i] = pe.Node(interface=fi, name='select_inputs_%s_%i' % (slice_name, i,))
+        select_inputs[i] = pe.Node(interface=fi, name='select_inputs_%s_%d_%d' % (slice_name, stage_nr, i,))
         select_inputs[i].inputs.i = i
         workflow.connect(inputs, 'out_files', select_inputs[i], 'x')
 
@@ -680,7 +682,7 @@ def create_stage(stage_nr, workflow, inputs, inputs_nr_slices, slice_name):
     for i in range(inputs_nr_slices - 1):
         interp_node = pe.Node(interface=InterpolateBetweenSlices(), name='interp_%s_%d_%08d' % (slice_name, stage_nr, i,))
 
-        select_node = pe.Node(interface=Select(index=[i, i + 1]), name='select_%s_%d_%d' % (slice_name, i, i + 1,))
+        select_node = pe.Node(interface=Select(index=[i, i + 1]), name='select_%s_%d_%d_%d' % (slice_name, stage_nr, i, i + 1,))
         workflow.connect(inputs, 'out_files', select_node, 'inlist')
         workflow.connect(select_node, 'out', interp_node, 'slices')
         interp_node.inputs.level = stage_nr
@@ -715,8 +717,19 @@ def create_stage(stage_nr, workflow, inputs, inputs_nr_slices, slice_name):
         workflow.connect(rename, 'out_file', datasink, 'slices.@%d' % i)
 
     # If we want to do another stage, use the out_file's of renamers.
-    return renamers
+    # We need a single node with an output 'out_files' consisting of each of the files.
+    merge_renamed_files = pe.Node(interface=Merge(len(renamers)), name='merge_renamed_files_%s_%d' % (slice_name, stage_nr,))
+    for (i, rename) in enumerate(renamers):
+        workflow.connect(rename, 'out_file', merge_renamed_files, 'in%d' % (i + 1))
 
+    # Now rename the output 'out' to 'out_files' so we can pass it in to a recursive
+    # call to this function.
+    out_to_out_files = pe.Node(
+                            interface=Function(input_names=['x'], output_names=['out_files'], function=identity_function),
+                            name='out_to_out_files_%s_%d' % (slice_name, stage_nr,))
+    workflow.connect(merge_renamed_files, 'out', out_to_out_files, 'x')
+
+    return out_to_out_files
 
 class SlicesToMincInputSpec(BaseInterfaceInputSpec):
     input_files = InputMultiPath(
@@ -921,22 +934,19 @@ def build_workflow(workflow, initial_inputs, slice_name, slice_size, dim_to_inte
 
     png_sink = pe.Node(nio.DataSink(), name='pngs_%s' % (slice_name,))
 
-    final_pngs = []
+    final_pngs = pe.MapNode(
+                        interface=NumpySliceToPNG(),
+                        name='final_npz_to_png_%s' % (slice_name,))
+    workflow.connect(final_outfiles, 'out_files', final_pngs, 'in_file')
+    workflow.connect(final_pngs, 'out_file', png_sink, 'pngs')
 
-    for (i, node) in enumerate(final_outfiles):
-        png = pe.Node(
-                    interface=NumpySliceToPNG(),
-                    name='final_npz_to_png_%s_%d' % (slice_name, i,))
-        final_pngs.append(png)
-
-        workflow.connect(node, 'out_file', png, 'in_file')
-        workflow.connect(png, 'out_file', png_sink, 'pngs.@%d' % i)
-
+    """
     # Merge final npz slices into a single thing.
     merge_final_npz = pe.Node(interface=Merge(len(final_outfiles)), name='merge_final_npz_%s' % (slice_name,))
 
     for (i, f) in enumerate(final_outfiles):
         workflow.connect(final_outfiles[i], 'out_file', merge_final_npz, 'in%d' % (i + 1))
+    """
 
     slices_to_minc = pe.Node(
                             interface=SlicesToMinc(
@@ -947,7 +957,7 @@ def build_workflow(workflow, initial_inputs, slice_name, slice_size, dim_to_inte
                                             separations=new_separations),
                             name='slices_to_minc_%s' % (slice_name,))
 
-    workflow.connect(merge_final_npz, 'out', slices_to_minc, 'input_files')
+    workflow.connect(final_outfiles, 'out_files', slices_to_minc, 'input_files')
 
     minc_sink = pe.Node(interface=nio.DataSink(), name='minc_%s' % (slice_name,))
     workflow.connect(slices_to_minc, 'out_file', minc_sink, 'minc_file')
@@ -978,7 +988,7 @@ def go():
     # Top-level parameters:
     input_file = 'data/small.mnc'
     dim_to_interpolate = 1
-    nr_interpolation_steps = 1
+    nr_interpolation_steps = 3
     workflow_name = 's62'
 
     ################
