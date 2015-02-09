@@ -820,7 +820,8 @@ class ExtractFeature(BaseInterface):
 
         self.out_files = []
         volume = volumeFromFile(in_file)
-        data = volume.data
+        data = np.copy(volume.data)
+        volume.closeVolume()
 
         data = select_structure(data, float_val, tol)
 
@@ -887,7 +888,9 @@ class MergeMincs(BaseInterface):
         components = {}
 
         for (i, lab) in enumerate(labels):
-            components[i] = volumeFromFile(in_files[i]).data.astype('uint8')
+            in_volume = volumeFromFile(in_files[i])
+            components[i] = np.copy(in_volume.data.astype('uint8'))
+            in_volume.closeVolume()
 
             v.data += lab*components[i]
 
@@ -985,6 +988,9 @@ def go():
     volume = volumeFromFile(input_file)
     data = volume.data
 
+    volume_dimnames = volume.dimnames
+    volume_starts   = volume.starts
+
     assert len(data.shape) == 3
     assert dim_to_interpolate in [0, 1, 2]
     assert nr_interpolation_steps >= 1
@@ -997,6 +1003,8 @@ def go():
     new_sizes = volume.sizes[:3]
     for s in new_sizes: assert s > 0
     new_sizes[dim_to_interpolate] = calc_new_sizes(new_sizes[dim_to_interpolate], nr_interpolation_steps)
+
+    volume.closeVolume()
 
     workflow = pe.Workflow(name=workflow_name)
 
@@ -1028,8 +1036,8 @@ def go():
 
         minc_sink[slice_name] = build_workflow(
                                         workflow, extract_node, slice_name,
-                                        slice_size, dim_to_interpolate, volume.dimnames,
-                                        nr_interpolation_steps, volume.starts, new_separations, new_sizes)
+                                        slice_size, dim_to_interpolate, volume_dimnames,
+                                        nr_interpolation_steps, volume_starts, new_separations, new_sizes)
 
     merge_minc_names = pe.Node(interface=Merge(len(minc_sink)), name='merge_minc_names')
 
@@ -1042,9 +1050,9 @@ def go():
 
     actual_final_merge.inputs.labels = map(float, cs)
 
-    actual_final_merge.inputs.dimension_names = volume.dimnames
+    actual_final_merge.inputs.dimension_names = volume_dimnames
     actual_final_merge.inputs.sizes           = new_sizes
-    actual_final_merge.inputs.starts          = volume.starts
+    actual_final_merge.inputs.starts          = volume_starts
     actual_final_merge.inputs.separations     = new_separations
 
     merged_minc_sink = pe.Node(interface=nio.DataSink(), name='merged_minc_sink')
@@ -1055,4 +1063,5 @@ def go():
 
 
 
-
+if __name__ == '__main__':
+    go()
