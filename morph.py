@@ -936,17 +936,10 @@ def build_workflow(workflow, initial_inputs, slice_name, slice_size, dim_to_inte
 
     final_pngs = pe.MapNode(
                         interface=NumpySliceToPNG(),
-                        name='final_npz_to_png_%s' % (slice_name,))
+                        name='final_npz_to_png_%s' % (slice_name,),
+                        iterfield=['in_file'])
     workflow.connect(final_outfiles, 'out_files', final_pngs, 'in_file')
     workflow.connect(final_pngs, 'out_file', png_sink, 'pngs')
-
-    """
-    # Merge final npz slices into a single thing.
-    merge_final_npz = pe.Node(interface=Merge(len(final_outfiles)), name='merge_final_npz_%s' % (slice_name,))
-
-    for (i, f) in enumerate(final_outfiles):
-        workflow.connect(final_outfiles[i], 'out_file', merge_final_npz, 'in%d' % (i + 1))
-    """
 
     slices_to_minc = pe.Node(
                             interface=SlicesToMinc(
@@ -1069,9 +1062,7 @@ def go():
     workflow.connect(actual_final_merge, 'out_file', merged_minc_sink, 'merged_minc_file')
 
     # workflow.run()
-    workflow.run(plugin='MultiProc', plugin_args={'n_procs' : 4})
-
-
+    workflow.run(plugin='MultiProc', plugin_args={'n_procs' : 16})
 
 if __name__ == '__main__':
     go()
