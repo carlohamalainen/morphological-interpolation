@@ -1015,7 +1015,7 @@ def go():
     assert cs[0] == 0
     cs = cs[1:]
 
-    cs = cs[21:][:2] # FIXME Just for testing...
+    # cs = cs[21:][:2] # FIXME Just for testing...
 
     extractors = []
 
