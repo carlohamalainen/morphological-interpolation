@@ -354,7 +354,7 @@ def interp_many_to_many(A, B, structure_component):
     results = []
 
     for (i, Bs) in targets.iteritems():
-        results.append(blap(comp_A[i], reduce(np.bitwise_or, Bs), structure_component))
+        results.append(blap(comp_A[i], reduce(np.bitwise_or, Bs, np.zeros(tuple(A.shape), dtype='uint8')), structure_component))
 
     return reduce(np.bitwise_or, results)
 
@@ -1064,11 +1064,10 @@ def go():
     # workflow.run()
 
     # FIXME Hardcoded...
-    os.system('rm -fr /tmp/tmp_carlo')
-    os.system('mkdir /tmp/tmp_carlo')
-    workflow.base_dir = '/tmp/tmp_carlo'
+    os.system('rm -fr /export/nif02/uqchamal/scratch_morph')
+    os.system('mkdir /export/nif02/uqchamal/scratch_morph')
+    workflow.base_dir = '/export/nif02/uqchamal/scratch_morph'
 
     workflow.run(plugin='MultiProc', plugin_args={'n_procs' : 16})
 
-if __name__ == '__main__':
-    go()
+if __name__ == '__main__': go()
