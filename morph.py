@@ -298,7 +298,7 @@ def multi_component_dilation(A, B, structure_component):
 
     if is_subset(A, union_dilations):
         print 'multi_component_dilation: using interp(A, union_dilations)'
-        result = interp(A, union_dilations)
+        result = interp(A, union_dilations, structure_component)
     else:
         print 'multi_component_dilation: splitting A and doing %d one-to-one interps' % len(B)
 
@@ -307,7 +307,7 @@ def multi_component_dilation(A, B, structure_component):
 
         assert len(A_split) == len(B)
 
-        result = reduce(np.bitwise_or, [interp(A_split[i], B[i]) for i in range(len(B))])
+        result = reduce(np.bitwise_or, [interp(A_split[i], B[i], structure_component) for i in range(len(B))])
 
         # The thing that we produce has to be different to B (otherwise we'll get stuck).
         assert distance(result, reduce(np.bitwise_or, B)) != 0
