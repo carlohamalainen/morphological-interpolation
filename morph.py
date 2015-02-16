@@ -22,6 +22,7 @@ See LICENSE for full license details.
 import math
 import numpy as np
 import os
+import sys
 
 import nipype.interfaces.io as nio
 import nipype.pipeline.engine as pe
@@ -143,23 +144,23 @@ def _interp(A, B, structure_component):
     assert overlap(A, B)
 
     # A \intersection B -> A
-    # print r'A \intersection B -> A'
+    print r'A \intersection B -> A'
     A_and_B_to_A = transition_sequence(np.bitwise_and(A, B), A, structure_component)
 
     # A \intersection B -> B
-    # print r'A \intersection B -> B'
+    print r'A \intersection B -> B'
     A_and_B_to_B = transition_sequence(np.bitwise_and(A, B), B, structure_component)
 
     l_A = len(A_and_B_to_A)
     l_B = len(A_and_B_to_B)
 
-    # print 'l_A:', l_A
-    # print 'l_B:', l_B
+    print 'l_A:', l_A
+    print 'l_B:', l_B
 
     seq = []
 
     for i in range(1, max(l_A, l_B) + 1):
-        # print 'interp: i =', i
+        print 'interp: i =', i
 
         if i <= min(l_A, l_B):
             # A_and_B_to_A[l_A - i] \union A_and_B_to_B[i - 1]
@@ -354,7 +355,7 @@ def interp_many_to_many(A, B, structure_component):
     results = []
 
     for (i, Bs) in targets.iteritems():
-        results.append(blap(comp_A[i], reduce(np.bitwise_or, Bs), structure_component))
+        results.append(blap(comp_A[i], reduce(np.bitwise_or, Bs, np.zeros(tuple(A.shape), dtype='uint8')), structure_component))
 
     return reduce(np.bitwise_or, results)
 
@@ -643,7 +644,7 @@ class InterpolateBetweenSlices(BaseInterface):
         self.output_file = base0 + '_to_' + base1 + '.npz'
 
         # FIXME This should be a parameter?
-        structure_component = morph.disk(radius=9)
+        structure_component = morph.disk(radius=2)
 
         result = blap(slice0, slice1, structure_component)
 
@@ -932,14 +933,14 @@ def build_workflow(workflow, initial_inputs, slice_name, slice_size, dim_to_inte
 
     final_outfiles = stage_outfiles
 
-    png_sink = pe.Node(nio.DataSink(), name='pngs_%s' % (slice_name,))
+    #png_sink = pe.Node(nio.DataSink(), name='pngs_%s' % (slice_name,))
 
-    final_pngs = pe.MapNode(
-                        interface=NumpySliceToPNG(),
-                        name='final_npz_to_png_%s' % (slice_name,),
-                        iterfield=['in_file'])
-    workflow.connect(final_outfiles, 'out_files', final_pngs, 'in_file')
-    workflow.connect(final_pngs, 'out_file', png_sink, 'pngs')
+    #final_pngs = pe.MapNode(
+    #                    interface=NumpySliceToPNG(),
+    #                    name='final_npz_to_png_%s' % (slice_name,),
+    #                    iterfield=['in_file'])
+    #workflow.connect(final_outfiles, 'out_files', final_pngs, 'in_file')
+    #workflow.connect(final_pngs, 'out_file', png_sink, 'pngs')
 
     slices_to_minc = pe.Node(
                             interface=SlicesToMinc(
@@ -977,12 +978,12 @@ def calc_new_sizes(old_size, nr_levels):
 
     return new_sizes
 
-def go():
+def go(component_index):
     # Top-level parameters:
     input_file = 'data/small.mnc'
     dim_to_interpolate = 1
     nr_interpolation_steps = 3
-    workflow_name = 's62'
+    workflow_name = 'morpho_%d' % component_index
 
     ################
 
@@ -1016,6 +1017,7 @@ def go():
     cs = cs[1:]
 
     # cs = cs[21:][:2] # FIXME Just for testing...
+    cs = [cs[component_index]]
 
     extractors = []
 
@@ -1061,14 +1063,83 @@ def go():
     merged_minc_sink = pe.Node(interface=nio.DataSink(), name='merged_minc_sink')
     workflow.connect(actual_final_merge, 'out_file', merged_minc_sink, 'merged_minc_file')
 
-    # workflow.run()
-
     # FIXME Hardcoded...
-    os.system('rm -fr /tmp/tmp_carlo')
-    os.system('mkdir /tmp/tmp_carlo')
-    workflow.base_dir = '/tmp/tmp_carlo'
+    # os.system('rm -fr /tmp/tmp_carlo')
+    # os.system('mkdir /tmp/tmp_carlo')
+    workflow.base_dir = '/scratch/morph_radius_2'
 
-    workflow.run(plugin='MultiProc', plugin_args={'n_procs' : 16})
+    # workflow.run()
+    workflow.run(plugin='MultiProc', plugin_args={'n_procs' : 4})
 
-if __name__ == '__main__':
-    go()
+# if __name__ == '__main__': go(int(sys.argv[1]))
+
+
+# data_8 = np.load('data_8.npz')['arr_0']
+# interp_3_to_4 = blap(data_8[:, 3, :], data_8[:, 4, :], morph.disk(radius=1))
+
+if True:
+    overlapping_pairs = [ (1, 2), (1, 18), (2, 10), (2, 18), (3, 16), (3, 18), (3, 23), (4, 15), (4, 17), (4, 29), (5, 6), (5, 7), (5, 22), (7, 22), (9, 10), (9, 12), (9, 14), (9, 21), (9, 22), (10, 12), (10, 14), (10, 16), (10, 18), (10, 19), (10, 20), (10, 21), (10, 22), (10, 23), (10, 25), (10, 26), (10, 28), (11, 12), (12, 15), (12, 19), (12, 21), (12, 29), (13, 18), (14, 16), (14, 19), (14, 22), (14, 23), (15, 21), (15, 29), (16, 18), (16, 20), (16, 21), (16, 23), (16, 26), (18, 20), (18, 21), (19, 22), (19, 26), (20, 21), (21, 29), (22, 26), (23, 24), (23, 25), (23, 26), (23, 28), (24, 25), (24, 26), (25, 27), (25, 28), (27, 28) ]
+
+    for (feature_i, feature_j) in overlapping_pairs:
+        print (feature_i, feature_j)
+
+        assert feature_i != feature_j
+
+        data_i = volumeFromFile('/home/carlo/Desktop/component_%d.mnc' % feature_i).data
+        data_j = volumeFromFile('/home/carlo/Desktop/component_%d.mnc' % feature_j).data
+
+        # FIXME Why the !!!?! are the values in component_?.mnc not 0/1?????
+        data_i[np.where(data_i > 0)] = 1
+        data_j[np.where(data_j > 0)] = 1
+
+        data_i = data_i.astype('uint8')
+        data_j = data_j.astype('uint8')
+
+        for k in range(data_i.shape[1]):
+            if overlap(data_i[:, k, :], data_j[:, k, :]):
+
+                # slice_intersection = np.bitwise_and(data_i[:, k, :], data_j[:, k, :])
+
+                # if np.max(slice_intersection.flatten()) == 0: continue
+
+                print feature_i, feature_j, k
+
+                # slice_i_part = (+1)*(np.bitwise_and(data_i[:, k, :], slice_intersection).astype('float'))
+                # slice_j_part = (+9)*(np.bitwise_and(data_j[:, k, :], slice_intersection).astype('float'))
+
+                # save_this = slice_i_part + slice_j_part
+
+                # write_slice(save_this, 'save_this_%d_%d_%04d.png' % (feature_i, feature_j, k))
+
+                save_this = 10*data_i.astype('float')[:, k, :] - 2*data_j.astype('float')[:, k, :]
+
+                write_slice(save_this, 'save_this_%d_%d_%04d.png' % (feature_i, feature_j, k))
+
+                # assert False
+
+
+if False:
+
+
+
+    data_i = volumeFromFile('/scratch/morph_radius_2/morpho_2/merged_minc_sink/merged_minc_file/merged.mnc').data.astype('uint8')
+    data_j = volumeFromFile('/scratch/morph_radius_1/morpho_2/merged_minc_sink/merged_minc_file/merged.mnc').data.astype('uint8')
+
+    for k in range(data_i.shape[1]):
+        write_slice(np.bitwise_xor(data_i[:, k, :], data_j[:, k, :]), 'radius_1_vs_2_%04d.png' % (k,))
+
+
+
+
+if False:
+
+    data_i = volumeFromFile('/scratch/morph/morpho_1/merged_minc_sink/merged_minc_file/merged.mnc').data.astype('uint8')
+    data_j = volumeFromFile('/scratch/morph/morpho_2/merged_minc_sink/merged_minc_file/merged.mnc').data.astype('uint8')
+
+    intersection = np.bitwise_and(data_i, data_j)
+
+    for k in range(data_i.shape[1]):
+        if overlap(data_i[:, k, :], data_j[:, k, :]):
+            print k
+            write_slice(np.bitwise_and(data_i[:, k, :], data_j[:, k, :]), 'overlap_%04d.png' % (k,))
+
