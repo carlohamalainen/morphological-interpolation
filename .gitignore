@@ -54,3 +54,7 @@ docs/_build/
 target/
 data/*
 *.swp
+save*png
+scores
+metrics*png
+crash*pklz
