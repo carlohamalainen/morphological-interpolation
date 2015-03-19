@@ -1447,7 +1447,12 @@ if False:
 
         new_volume.data[:] += cs[component_nr]*component.data.astype('uint8')
 
+    # FIXME Hardcoded...
+    os.system('rm -fr /export/nif02/uqchamal/scratch_morph')
+    os.system('mkdir /export/nif02/uqchamal/scratch_morph')
+    workflow.base_dir = '/export/nif02/uqchamal/scratch_morph'
 
     new_volume.writeFile()
     new_volume.closeVolume()
 
+if __name__ == '__main__': go()
