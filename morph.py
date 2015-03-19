@@ -1004,12 +1004,14 @@ def calc_new_sizes(old_size, nr_levels):
 
     return new_sizes
 
-def go(component_index):
+def go(): # component_index):
     # Top-level parameters:
-    input_file = 'data/small.mnc'
+    # input_file = 'data/small.mnc'
+    input_file = '/home/carlo/00-init-label-vol.mnc'
     dim_to_interpolate = 1
     nr_interpolation_steps = 3
-    workflow_name = 'morpho_%d' % component_index
+    # workflow_name = 'morpho_%d' % component_index
+    workflow_name = 'morpho'
 
     ################
 
@@ -1043,7 +1045,7 @@ def go(component_index):
     cs = cs[1:]
 
     # cs = cs[21:][:2] # FIXME Just for testing...
-    cs = [cs[component_index]]
+    # cs = [cs[component_index]]
 
     extractors = []
 
@@ -1092,7 +1094,8 @@ def go(component_index):
     # FIXME Hardcoded...
     # os.system('rm -fr /tmp/tmp_carlo')
     # os.system('mkdir /tmp/tmp_carlo')
-    workflow.base_dir = '/scratch/morph_debug'
+    # workflow.base_dir = '/scratch/morph_debug'
+    workflow.base_dir = '/scratch/init_00_morph'
 
     # workflow.run()
     workflow.run(plugin='MultiProc', plugin_args={'n_procs' : 4})
@@ -1103,7 +1106,7 @@ def go(component_index):
 # data_8 = np.load('data_8.npz')['arr_0']
 # interp_3_to_4 = blap(data_8[:, 3, :], data_8[:, 4, :], morph.disk(radius=1))
 
-overlapping_pairs = [ (1, 2), (1, 18), (2, 10), (2, 18), (3, 16), (3, 18), (3, 23), (4, 15), (4, 17), (4, 29), (5, 6), (5, 7), (5, 22), (7, 22), (9, 10), (9, 12), (9, 14), (9, 21), (9, 22), (10, 12), (10, 14), (10, 16), (10, 18), (10, 19), (10, 20), (10, 21), (10, 22), (10, 23), (10, 25), (10, 26), (10, 28), (11, 12), (12, 15), (12, 19), (12, 21), (12, 29), (13, 18), (14, 16), (14, 19), (14, 22), (14, 23), (15, 21), (15, 29), (16, 18), (16, 20), (16, 21), (16, 23), (16, 26), (18, 20), (18, 21), (19, 22), (19, 26), (20, 21), (21, 29), (22, 26), (23, 24), (23, 25), (23, 26), (23, 28), (24, 25), (24, 26), (25, 27), (25, 28), (27, 28) ] + [(10, 15)]
+# overlapping_pairs = [ (1, 2), (1, 18), (2, 10), (2, 18), (3, 16), (3, 18), (3, 23), (4, 15), (4, 17), (4, 29), (5, 6), (5, 7), (5, 22), (7, 22), (9, 10), (9, 12), (9, 14), (9, 21), (9, 22), (10, 12), (10, 14), (10, 16), (10, 18), (10, 19), (10, 20), (10, 21), (10, 22), (10, 23), (10, 25), (10, 26), (10, 28), (11, 12), (12, 15), (12, 19), (12, 21), (12, 29), (13, 18), (14, 16), (14, 19), (14, 22), (14, 23), (15, 21), (15, 29), (16, 18), (16, 20), (16, 21), (16, 23), (16, 26), (18, 20), (18, 21), (19, 22), (19, 26), (20, 21), (21, 29), (22, 26), (23, 24), (23, 25), (23, 26), (23, 28), (24, 25), (24, 26), (25, 27), (25, 28), (27, 28) ] + [(10, 15)]
 
 if False:
     import multiprocessing as mp
@@ -1412,7 +1415,7 @@ if False:
     component_nrs = [x for x in range(0, 29 + 1) if x != 8]
     print pool.map(do_component, component_nrs)
 
-if True:
+if False:
     for component_a in range(0, 29 + 1):
         if component_a == 8: continue
 
