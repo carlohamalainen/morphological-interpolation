@@ -55,6 +55,20 @@ import scipy.ndimage.measurements
 
 from utils import *
 
+# FIXME Make these parameters of the workflow.
+TRANSITION_SEQUENCE_MAX_DILATIONS = 40
+TRANSITION_SEQUENCE_TRUNCATION    = 4
+
+EXTREME_DILATION_MAX = 400
+
+def invert(d):
+    x = np.zeros(d.shape, dtype='uint8')
+
+    x[d == 1] = 0
+    x[d == 0] = 1
+
+    return x
+
 def nr_components(x):
     """
     Use scipy.ndimage.measurements.label to find the number of
@@ -110,6 +124,9 @@ def transition_sequence(start_set, ref_set, structure_component):
     'start_set' and using 'ref_set' as the reference set at each step.
     This process is guaranteed to terminate due to reference Serra [25]
     in ABL.
+
+    But on 0, 13, 45, 80, 94 of the init00 dataset this did not
+    converge, hence the TRANSITION_SEQUENCE_MAX_DILATIONS parameter.
     """
 
     dilations = [conditional_dilation(start_set, ref_set, structure_component)]
@@ -117,6 +134,12 @@ def transition_sequence(start_set, ref_set, structure_component):
     while not np.array_equal(dilations[-1], ref_set):
         new_dilation = conditional_dilation(dilations[-1], ref_set, structure_component)
         dilations.append(new_dilation)
+
+	print 'transition_sequence, length of dilations:', len(dilations)
+
+        if len(dilations) > TRANSITION_SEQUENCE_MAX_DILATIONS:
+            dilations = dilations[:TRANSITION_SEQUENCE_TRUNCATION]
+            break
 
     return dilations
 
@@ -143,8 +166,6 @@ def _interp(A, B, structure_component):
     The seq array corresponds to Equation 5 in ABL, and the final
     answer seq[index_med] uses Equation 6.
     """
-
-    assert overlap(A, B)
 
     # A \intersection B -> A
     print r'A \intersection B -> A'
@@ -219,7 +240,7 @@ def compute_Ref(S, i, A):
         assert len(result) == len(x) - 1
         return result
 
-    return reduce(np.bitwise_or, [complement_in(s, A) for s in drop_ith(S, i)])
+    return reduce(np.bitwise_or, [complement_in(s, A) for s in drop_ith(S, i)], np.zeros(tuple(A.shape), dtype='uint8'))
 
 def split(A, Bs, structure_component):
     for B in Bs: assert A.shape == B.shape
@@ -237,6 +258,7 @@ def split(A, Bs, structure_component):
     not_finished = True
 
     while not_finished:
+        print 'not_finished...'
         new_S   = [conditional_dilation(S[i], Ref[i], structure_component) for i in range(len(S))]
         new_Ref = [compute_Ref(new_S, i, A)                                for i in range(len(S))]
 
@@ -262,25 +284,7 @@ def split(A, Bs, structure_component):
         Ref = new_Ref
         p  += 1
 
-    # Make sure the regions are disjoint.
-    for i in range(len(S)):
-        for j in range(len(S)):
-            if i < j:
-                intersection = np.bitwise_and(S[i], S[j])
-                S[i] -= intersection
-                S[j] -= intersection
-                assert S[i].min() == 0
-                assert S[j].min() == 0
-                assert S[i].max() == 1
-                assert S[j].max() == 1
-
-    for i in range(len(S)):
-        for j in range(len(S)):
-            if i < j:
-                assert np.bitwise_and(S[i], S[j]).max() == 0
-
     return S
-
 
 def multi_component_dilation(A, B, structure_component):
     """
@@ -306,12 +310,15 @@ def multi_component_dilation(A, B, structure_component):
     else:
         print 'multi_component_dilation: splitting A and doing %d one-to-one interps' % len(B)
 
-        # FIXME should nr_components(A_split) > 1?
         A_split = split(A, B, structure_component)
 
         assert len(A_split) == len(B)
 
-        result = reduce(np.bitwise_or, [interp(A_split[i], B[i], structure_component) for i in range(len(B))])
+        # FIXME Can this cause a loop?
+        result = reduce(np.bitwise_or, [blap(A_split[i], B[i], structure_component) for i in range(len(B))])
+
+        # Original version:
+        # result = reduce(np.bitwise_or, [interp(A_split[i], B[i], structure_component) for i in range(len(B))])
 
         # The thing that we produce has to be different to B (otherwise we'll get stuck).
         assert distance(result, reduce(np.bitwise_or, B)) != 0
@@ -337,10 +344,23 @@ def interp_one_to_many(A, B, structure_component):
     Bs = components(B)
     for b in Bs: assert b.shape == A.shape
 
-    result = multi_component_dilation(A, Bs, structure_component)
-    assert result.shape == A.shape
+    # Some of these components might overlap with A, while others
+    # won't. Split into two cases.
+    Bs_overlap_with_A = [x for x in Bs if     overlap(x, A)]
+    Bs_no_overlap     = [x for x in Bs if not overlap(x, A)]
 
-    return result
+    # Interpolation of parts that overlap:
+    result1 = multi_component_dilation(A, Bs_overlap_with_A, structure_component)
+    assert result1.shape == A.shape
+
+    # Interpolation of parts that do not overlap:
+    Z = np.zeros(A.shape, dtype='uint8')
+    result2 = [interp_zero_to_one(Z, x, structure_component) for x in Bs_no_overlap]
+    result2 = reduce(np.bitwise_or, result2, np.zeros(tuple(A.shape), dtype='uint8'))
+
+    final_result = np.bitwise_or(result1, result2)
+
+    return final_result
 
 def interp_many_to_many(A, B, structure_component):
     print 'interp_many_to_many'
@@ -441,6 +461,12 @@ def extreme_dilation(E, X, structure_component):
     while distance(d, X) > 0:
         d = conditional_dilation(d, X, structure_component)
         seq.append(d)
+
+        print 'extreme_dilation, len(seq):', len(seq)
+
+        # This can explode so cap the number
+        # of dilations that we can do:
+        if len(seq) > EXTREME_DILATION_MAX: break
 
     distances = np.array([np.abs(distance(s, E) - distance(s, X)) for s in seq])
     index_med = np.argmin(distances)
@@ -656,7 +682,7 @@ class InterpolateBetweenSlices(BaseInterface):
         self.output_file = base0 + '_to_' + base1 + '.npz'
 
         # FIXME This should be a parameter?
-        structure_component = morph.disk(radius=2)
+        structure_component = morph.disk(radius=1)
 
         result = blap(slice0, slice1, structure_component)
 
@@ -1004,14 +1030,12 @@ def calc_new_sizes(old_size, nr_levels):
 
     return new_sizes
 
-def go(): # component_index):
+def go(component_index):
     # Top-level parameters:
-    # input_file = 'data/small.mnc'
-    input_file = '/home/carlo/00-init-label-vol.mnc'
+    input_file = '/mnt/home/carlo/00-init-label-vol.mnc'
     dim_to_interpolate = 1
     nr_interpolation_steps = 3
-    # workflow_name = 'morpho_%d' % component_index
-    workflow_name = 'morpho'
+    workflow_name = 'morpho_%d' % component_index
 
     ################
 
@@ -1045,7 +1069,7 @@ def go(): # component_index):
     cs = cs[1:]
 
     # cs = cs[21:][:2] # FIXME Just for testing...
-    # cs = [cs[component_index]]
+    cs = [cs[component_index]]
 
     extractors = []
 
@@ -1095,273 +1119,10 @@ def go(): # component_index):
     # os.system('rm -fr /tmp/tmp_carlo')
     # os.system('mkdir /tmp/tmp_carlo')
     # workflow.base_dir = '/scratch/morph_debug'
-    workflow.base_dir = '/scratch/init_00_morph'
+    #workflow.base_dir = '/scratch/init_00_morph'
 
     # workflow.run()
     workflow.run(plugin='MultiProc', plugin_args={'n_procs' : 4})
-
-# if __name__ == '__main__': go(int(sys.argv[1]))
-
-
-# data_8 = np.load('data_8.npz')['arr_0']
-# interp_3_to_4 = blap(data_8[:, 3, :], data_8[:, 4, :], morph.disk(radius=1))
-
-# overlapping_pairs = [ (1, 2), (1, 18), (2, 10), (2, 18), (3, 16), (3, 18), (3, 23), (4, 15), (4, 17), (4, 29), (5, 6), (5, 7), (5, 22), (7, 22), (9, 10), (9, 12), (9, 14), (9, 21), (9, 22), (10, 12), (10, 14), (10, 16), (10, 18), (10, 19), (10, 20), (10, 21), (10, 22), (10, 23), (10, 25), (10, 26), (10, 28), (11, 12), (12, 15), (12, 19), (12, 21), (12, 29), (13, 18), (14, 16), (14, 19), (14, 22), (14, 23), (15, 21), (15, 29), (16, 18), (16, 20), (16, 21), (16, 23), (16, 26), (18, 20), (18, 21), (19, 22), (19, 26), (20, 21), (21, 29), (22, 26), (23, 24), (23, 25), (23, 26), (23, 28), (24, 25), (24, 26), (25, 27), (25, 28), (27, 28) ] + [(10, 15)]
-
-if False:
-    import multiprocessing as mp
-
-    files = [ '/home/carlo/Desktop/component_0.mnc', '/home/carlo/Desktop/component_10.mnc', '/home/carlo/Desktop/component_11.mnc', '/home/carlo/Desktop/component_12.mnc', '/home/carlo/Desktop/component_13.mnc', '/home/carlo/Desktop/component_14.mnc', '/home/carlo/Desktop/component_15.mnc', '/home/carlo/Desktop/component_16.mnc', '/home/carlo/Desktop/component_17.mnc', '/home/carlo/Desktop/component_18.mnc', '/home/carlo/Desktop/component_19.mnc', '/home/carlo/Desktop/component_1.mnc', '/home/carlo/Desktop/component_20.mnc', '/home/carlo/Desktop/component_21.mnc', '/home/carlo/Desktop/component_22.mnc', '/home/carlo/Desktop/component_23.mnc', '/home/carlo/Desktop/component_24.mnc', '/home/carlo/Desktop/component_25.mnc', '/home/carlo/Desktop/component_26.mnc', '/home/carlo/Desktop/component_27.mnc', '/home/carlo/Desktop/component_28.mnc', '/home/carlo/Desktop/component_29.mnc', '/home/carlo/Desktop/component_2.mnc', '/home/carlo/Desktop/component_3.mnc', '/home/carlo/Desktop/component_4.mnc', '/home/carlo/Desktop/component_5.mnc', '/home/carlo/Desktop/component_6.mnc', '/home/carlo/Desktop/component_7.mnc', '/home/carlo/Desktop/component_9.mnc']
-
-    overlaps = {}
-
-    def check_overlap((f_i, f_j,)):
-        data_i = volumeFromFile(f_i).data
-        data_j = volumeFromFile(f_j).data
-
-        data_i[np.where(data_i > 0)] = 1
-        data_j[np.where(data_j > 0)] = 1
-
-        data_i = data_i.astype('uint8')
-        data_j = data_j.astype('uint8')
-
-        for k in range(data_i.shape[1]):
-            if overlap(data_i[:, k, :], data_j[:, k, :]):
-                #assert i < j
-                return (i, j)
-
-        return None
-
-    file_pairs = []
-
-    for (i, f_i) in enumerate(files):
-        for (j, f_j) in enumerate(files):
-            if j <= i: continue
-            print f_i, f_j
-            file_pairs.append((f_i, f_j))
-
-    pool = mp.Pool(processes=4)
-    results = pool.map(check_overlap, file_pairs)
-
-    print(results)
-
-if False:
-
-    scores = {}
-
-    for (feature_i, feature_j) in overlapping_pairs:
-        # print (feature_i, feature_j)
-
-        assert feature_i != feature_j
-
-        if (feature_i, feature_j) not in scores: scores[(feature_i, feature_j)] = 0
-        if (feature_j, feature_i) not in scores: scores[(feature_j, feature_i)] = 0
-
-        data_i = volumeFromFile('/home/carlo/Desktop/component_%d.mnc' % feature_i).data
-        data_j = volumeFromFile('/home/carlo/Desktop/component_%d.mnc' % feature_j).data
-
-        # FIXME Why the !!!?! are the values in component_?.mnc not 0/1?????
-        data_i[np.where(data_i > 0)] = 1
-        data_j[np.where(data_j > 0)] = 1
-
-        data_i = data_i.astype('uint8')
-        data_j = data_j.astype('uint8')
-
-        for k in range(data_i.shape[1]):
-            if overlap(data_i[:, k, :], data_j[:, k, :]):
-
-                slice_intersection = np.bitwise_and(data_i[:, k, :], data_j[:, k, :])
-
-                # if np.max(slice_intersection.flatten()) == 0: continue
-
-                # print feature_i, feature_j, k
-
-                # slice_i_part = (+1)*(np.bitwise_and(data_i[:, k, :], slice_intersection).astype('float'))
-                # slice_j_part = (+9)*(np.bitwise_and(data_j[:, k, :], slice_intersection).astype('float'))
-
-                # save_this = slice_i_part + slice_j_part
-
-                # write_slice(save_this, 'save_this_%d_%d_%04d.png' % (feature_i, feature_j, k))
-
-                # save_this = 10*data_i.astype('float')[:, k, :] - 2*data_j.astype('float')[:, k, :]
-
-                # write_slice(save_this, 'save_this_%d_%d_%04d.png' % (feature_i, feature_j, k))
-
-                # assert False
-
-                # Winner is largest feature?
-                feature_i_size = float(data_i[:, k, :].flatten().sum())
-                feature_j_size = float(data_j[:, k, :].flatten().sum())
-
-                # Metrics.
-                intersection_size = float(slice_intersection.flatten().sum())
-
-                #if intersection_size/feature_i_size > 0.8:
-                #    # feature_i is almost completely contained in the intersection, so it's
-                #    # probably one of those dodgy extreme dilation situations.
-                #    scores[(feature_i, feature_j)] += 1000 # FIXME Make this tuneable parameter.
-
-                print 'feature %d vs feature %d, slice %d' % (feature_i, feature_j, k)
-                print '\tintersection_size/feature_i_size: %.2f' % (intersection_size/feature_i_size)
-                print '\tintersection_size/feature_j_size: %.2f' % (intersection_size/feature_j_size)
-                print
-
-                if intersection_size/feature_i_size > 0.5:
-                    scores[(feature_i, feature_j)] += 100
-
-                if intersection_size/feature_j_size > 0.5:
-                    scores[(feature_j, feature_i)] += 100
-
-
-                scores[(feature_i, feature_j)] += intersection_size/feature_i_size
-                scores[(feature_j, feature_i)] += intersection_size/feature_j_size
-
-                # if score[(i, j)] is big, we prefer to nuke i when j is overlapping.
-                # Need to check if (i, j) and (j, i) in scores, take maximum.
-
-                print '\tintersection_size/feature_j_size: %.2f' % (intersection_size/feature_j_size)
-
-
-if False:
-
-    data_i = volumeFromFile('/home/carlo/Desktop/component_27.mnc').data.astype('uint8')
-    data_j = volumeFromFile('/home/carlo/Desktop/component_28.mnc').data.astype('uint8')
-
-    intersection = np.bitwise_and(data_i, data_j)
-
-    for k in range(data_i.shape[1]):
-        if overlap(data_i[:, k, :], data_j[:, k, :]):
-            print k
-            write_slice(0*data_i[:, k, :] + data_j[:, k, :], 'metrics_%04d.png' % (k,))
-
-if False:
-
-    data_i = volumeFromFile('/scratch/morph/morpho_1/merged_minc_sink/merged_minc_file/merged.mnc').data.astype('uint8')
-    data_j = volumeFromFile('/scratch/morph/morpho_2/merged_minc_sink/merged_minc_file/merged.mnc').data.astype('uint8')
-
-    intersection = np.bitwise_and(data_i, data_j)
-
-    for k in range(data_i.shape[1]):
-        if overlap(data_i[:, k, :], data_j[:, k, :]):
-            print k
-            write_slice(np.bitwise_and(data_i[:, k, :], data_j[:, k, :]), 'overlap_%04d.png' % (k,))
-
-def highest_score(scores):
-    max_score = None
-    max_idx   = None
-
-    for ((i, j), s) in scores.iteritems():
-        if max_score is None:
-            max_score = s
-            max_idx   = (i, j)
-
-        else:
-            if s > max_score:
-                max_score = s
-                max_idx   = (i, j)
-
-    return max_idx, max_score
-
-if False:
-    os.system('rm -fr /scratch/intersection_input/*')
-    # Make 0-1 versions of each file.
-    for i in set(reduce(operator.add, [[x[0], x[1]] for x in overlapping_pairs], [])):
-        print '0-1:', i
-
-        v_source = volumeFromFile('/home/carlo/Desktop/component_%d.mnc' % i)
-
-        v = volumeLikeFile('/home/carlo/Desktop/component_%d.mnc' % i, '/scratch/intersection_input/input_%d.mnc' % i, dtype='ubyte')
-        v.data[:] = v_source.data[:]
-
-        v.data[np.where(v.data > 0)] = 1
-        v.writeFile()
-        v.closeVolume()
-
-        v_source.closeVolume()
-
-if False:
-
-    scores = pickle.load(open('scores', 'r'))
-    print scores
-
-    os.system('rm -fr /scratch/intersection_output')
-    os.system('mkdir /scratch/intersection_output')
-    os.system('cp /scratch/intersection_input/* /scratch/intersection_output/')
-
-    print highest_score(scores)
-
-    while len(scores) > 0:
-        (i, j), s = highest_score(scores)
-
-        assert scores[(j, i)] < s
-
-        v_i = volumeFromFile('/scratch/intersection_output/input_%d.mnc' % i, readonly=False)
-        v_j = volumeFromFile('/scratch/intersection_output/input_%d.mnc' % j)
-
-        # v_i loses to v_j.
-        print 'removing intersection(%d, %d) from component %d' % (i, j, i,)
-
-        for k in range(v_i.data.shape[1]):
-            if overlap(v_i.data[:, k, :].astype('uint8'), v_j.data[:, k, :].astype('uint8')):
-                print k
-                v_i.data[:, k, :] -= np.bitwise_and(v_i.data[:, k, :].astype('uint8'), v_j.data[:, k, :].astype('uint8'))
-
-        v_i.volumeType = 'ubyte' # FIXME What???????
-        v_i.writeFile()
-        v_i.closeVolume()
-        v_j.closeVolume()
-
-        del scores[(i, j)]
-        del scores[(j, i)]
-
-
-if False:
-    files = [ 'input_10.mnc', 'input_11.mnc', 'input_12.mnc', 'input_13.mnc', 'input_14.mnc', 'input_15.mnc', 'input_16.mnc', 'input_17.mnc', 'input_18.mnc', 'input_19.mnc', 'input_1.mnc', 'input_20.mnc', 'input_21.mnc', 'input_22.mnc', 'input_23.mnc', 'input_24.mnc', 'input_25.mnc', 'input_26.mnc', 'input_27.mnc', 'input_28.mnc', 'input_29.mnc', 'input_2.mnc', 'input_3.mnc', 'input_4.mnc', 'input_5.mnc', 'input_6.mnc', 'input_7.mnc', 'input_9.mnc' ]
-
-
-    for i in range(len(files)):
-        for j in range(i + 1, len(files)):
-            assert i != j
-            assert i < j
-
-            if (i, j) in [(0, 5), (0, 15)]: continue
-
-            v_i = volumeFromFile('/scratch/intersection_output/' + files[i])
-            v_j = volumeFromFile('/scratch/intersection_output/' + files[j])
-
-            for k in range(v_i.data.shape[1]):
-                print i, j, k
-                assert not overlap(v_i.data[:, k, :].astype('uint8'), v_j.data[:, k, :].astype('uint8'))
-
-            v_i.closeVolume()
-            v_j.closeVolume()
-
-def invert(d):
-    x = np.zeros(d.shape, dtype='uint8')
-
-    x[d == 1] = 0
-    x[d == 0] = 1
-
-    return x
-
-if False:
-    v = volumeFromFile('/home/carlo/input_2.mnc')
-
-    data = v.data[:, 13, :]
-    data = data.astype('uint8')
-
-    # Invert the image.
-    data = invert(data)
-
-    # Dilate it.
-    data = morph.binary_dilation(data, selem=morph.disk(radius=2)).astype('uint8')
-    data = morph.binary_dilation(data, selem=morph.disk(radius=2)).astype('uint8')
-    data = morph.binary_dilation(data, selem=morph.disk(radius=2)).astype('uint8')
-
-    # Invert back.
-    data = invert(data)
-
-    show_slice(data)
 
 def blerp(data):
     data = data.astype('uint8')
@@ -1408,54 +1169,4 @@ def do_component(component_nr):
             write_slice(blerp(d[:, j, :]), '/tmp/component_%04d_%04d.png' % (component_nr, j,))
     """
 
-if False:
-    from multiprocessing import Pool
-    pool = Pool(processes=4)
-
-    component_nrs = [x for x in range(0, 29 + 1) if x != 8]
-    print pool.map(do_component, component_nrs)
-
-if False:
-    for component_a in range(0, 29 + 1):
-        if component_a == 8: continue
-
-        vol_a  = volumeFromFile('/scratch/final_smoothed_disjoint_components/component_%d.mnc' % component_a)
-
-        for component_b in range(component_a + 1, 29 + 1):
-            if component_b == 8: continue
-            vol_b  = volumeFromFile('/scratch/final_smoothed_disjoint_components/component_%d.mnc' % component_b)
-
-            print component_a, component_b
-
-            for j in range(vol_a.data.shape[1]):
-                assert not overlap(vol_a.data[:, j, :].astype('uint8'), vol_b.data[:, j, :].astype('uint8'))
-
-
-if False:
-    data = volumeFromFile('data/small.mnc').data
-    cs = sorted(uniq(data.flatten()))
-    assert cs[0] == 0
-    cs = cs[1:]
-    del data
-
-    new_volume = volumeLikeFile('/scratch/final_smoothed_disjoint_components/component_0.mnc', '/scratch/final_smoothed_disjoint_components/final.mnc', dtype='float')
-    new_volume.data[:] = 0
-
-    for component_nr in range(0, 29 + 1):
-        if component_nr == 8: continue
-
-        print component_nr
-
-        component = volumeFromFile('/scratch/final_smoothed_disjoint_components/component_%d.mnc' % component_nr)
-
-        new_volume.data[:] += cs[component_nr]*component.data.astype('uint8')
-
-    # FIXME Hardcoded...
-    os.system('rm -fr /export/nif02/uqchamal/scratch_morph')
-    os.system('mkdir /export/nif02/uqchamal/scratch_morph')
-    workflow.base_dir = '/export/nif02/uqchamal/scratch_morph'
-
-    new_volume.writeFile()
-    new_volume.closeVolume()
-
-if __name__ == '__main__': go()
+if __name__ == '__main__': go(int(sys.argv[1]))
