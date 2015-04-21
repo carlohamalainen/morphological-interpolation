@@ -25,7 +25,7 @@ from nipype.interfaces.base import (
 )
 
 import matplotlib
-#matplotlib.use('Agg') # Force matplotlib to not use any Xwindows backend.
+matplotlib.use('Agg') # Force matplotlib to not use any Xwindows backend.
 import matplotlib.pyplot as plt
 
 from pyminc.volumes.factory import volumeFromFile, volumeFromDescription
